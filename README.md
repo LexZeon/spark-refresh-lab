@@ -1,4 +1,4 @@
-# Spark Refresh Lab
+# Spark Refresh Lab — RTX Spark OLED typing-flicker workaround
 
 [English](#english) · [中文](#中文)
 
@@ -7,6 +7,10 @@
 **This tool shows a small visible animation to try to reduce the brief brightness pulse that can happen when typing into an otherwise still screen.**
 
 The user of one MSI Prestige N16 Flip AI+ / NVIDIA RTX Spark laptop has tested both options: **method 1, Moving Ball, and method 2, Canvas Redraw, markedly alleviate the flicker on that machine.** This is one user's experience on one computer. It does not establish that the tool will work on other computers, or that the cause has been identified or repaired.
+
+### Does this match your screen flicker?
+
+The reported case is an **MSI Prestige N16 Flip AI+ OLED** laptop with **RTX Spark N1X**, running **Windows on ARM (ARM64)**. Its symptom is **flicker when typing**: a brief whole-screen **brightness pulse** after a keypress on an otherwise still screen, especially noticeable near the corners and in dark-gray areas. Visible Moving Ball and Canvas Redraw markedly alleviate it for this user; the result has not been verified across other hardware.
 
 ### Download and use
 
@@ -41,6 +45,10 @@ See [the user's comparison record](docs/results-2026-10-23-local-multimethod.md)
 
 For your own comparison, fully exit the app, wait about 10 seconds, and type a short English or Pinyin sample. Then enable one method, wait about 10 seconds, and type the same sample. Stop screen capture and remote automation while observing, because these activities have masked the symptom. An increasing counter does not establish relief.
 
+### Report the same symptom or a test result
+
+Open a [GitHub issue](https://github.com/LexZeon/spark-refresh-lab/issues) with your computer model, Windows version/build and architecture, NVIDIA driver version, and the method you tried. State whether the animation was actually visible or covered, and whether typing flicker improved, stayed the same, or became worse. These comparisons can help establish which configurations share the symptom; they do not establish a common root cause.
+
 ### Runtime requirements
 
 Extract the complete ZIP to use the tool. The app does not install a display driver or require administrator elevation. Your computer must **already have .NET Framework 4.8.1 and Microsoft Edge WebView2 Evergreen Runtime installed**; neither runtime is bundled in the ZIP.
@@ -54,6 +62,10 @@ The tool does not change the display refresh rate, brightness, ICC profile, regi
 **给“画面静止时，一打字屏幕就跳亮一下”的电脑做一个可见的小动画，尝试减轻闪烁。**
 
 这台 MSI Prestige N16 Flip AI+ / NVIDIA RTX Spark 电脑的使用者已经实测：**方法 1「小球移动」和方法 2「画布重画（Canvas）」都能明显缓和闪烁。** 这是同一台电脑上的使用者反馈，尚不能保证其他电脑也有效，也没有修复或确认闪烁的根本原因。
+
+### 是否也是打字闪烁、亮度跳变？
+
+这次报告来自一台 **MSI Prestige N16 Flip AI+ OLED** 笔记本，使用 **RTX Spark N1X** 和 **Windows on ARM（ARM64）**。具体表现是：画面原本静止，每次按键后整个屏幕短暂跳亮，角落和深灰区域尤其明显。可见的小球移动、画布重画都让这位使用者感觉明显缓和；尚未验证其他硬件上的效果，也没有确认共同根因。
 
 ### 下载后怎么用
 
@@ -93,6 +105,10 @@ The tool does not change the display refresh rate, brightness, ICC profile, regi
 
 如果想自己对照：完全退出程序，等约 10 秒，输入一段英文或拼音；再开一种方式，等约 10 秒，输入相同文字。观察时停止截图和远程自动操作，因为这些活动曾掩盖症状。不要只看程序计数就判断有效。
 
+### 报告相同症状或测试结果
+
+可以在 [GitHub Issues](https://github.com/LexZeon/spark-refresh-lab/issues) 留下电脑型号、Windows 版本/内部版本号与架构、NVIDIA 驱动版本，以及试用的小球或画布方式。请说明动画当时实际可见还是被遮住，打字闪烁是减轻、没变化，还是更严重。这有助于比较哪些配置出现类似症状，不能据此认定它们有同一个根本原因。
+
 ### 运行环境
 
 完整 ZIP 解压后即可运行本工具，无需为本工具安装显示驱动或使用管理员权限。电脑需要**已经安装 .NET Framework 4.8.1 和 Microsoft Edge WebView2 Evergreen Runtime**；ZIP 不包含这两个运行环境。
@@ -123,3 +139,4 @@ The Microsoft WebView2 SDK and loader retain their own license; see the dependen
 - [WebView2 browser flags and diagnostic-use limitations](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/webview-features-flags)
 - [Chromium native window occlusion tracking](https://chromium.googlesource.com/chromium/src/+/main/docs/windows_native_window_occlusion_tracking.md)
 - [NVIDIA driver-feedback instructions](https://nvidia.custhelp.com/app/answers/detail/a_id/3141)
+
