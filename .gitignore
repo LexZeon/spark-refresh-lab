@@ -1,0 +1,14 @@
+/.packages/
+/.deps/
+/artifacts/
+/out/
+/dist/
+/test-results/
+/logs/
+*.user
+*.suo
+*.log
+*.csv
+*.zip
+/tests/smoke-*.json
+

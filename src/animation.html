@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>Local rAF diagnostic</title>
+<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#202020}#dot{position:absolute;left:8px;top:calc(50% - 3px);width:6px;height:6px;border-radius:50%;background:#808080;will-change:transform}</style></head>
+<body><div id="dot"></div><script>
+"use strict";
+(() => {
+  const dot = document.getElementById("dot");
+  let running = false, noPaint = false, request = null, count = 0;
+  function tick(time) {
+    if (!running) return;
+    count++;
+    if (!noPaint) {
+      const cycle = (time % 2400) / 2400;
+      const position = cycle < 0.5 ? cycle * 2 : (1 - cycle) * 2;
+      dot.style.transform = `translate3d(${(Math.max(0, innerWidth - 22) * position).toFixed(3)}px,0,0)`;
+    }
+    request = requestAnimationFrame(tick);
+  }
+  window.spark = {
+    start(testWithoutPaint) {
+      noPaint = !!testWithoutPaint;
+      if (running) return;
+      running = true;
+      request = requestAnimationFrame(tick);
+    },
+    stop() {
+      running = false;
+      if (request !== null) cancelAnimationFrame(request);
+      request = null;
+    },
+    snapshot() {
+      return { callbackCount: count, running, noPaint, visibilityState: document.visibilityState,
+        documentHidden: document.hidden, performanceMilliseconds: performance.now() };
+    }
+  };
+})();
+</script></body></html>
