@@ -2,36 +2,66 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
 <title>Local rAF diagnostic</title>
-<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#202020}#dot{position:absolute;left:8px;top:calc(50% - 3px);width:6px;height:6px;border-radius:50%;background:#808080;will-change:transform}</style></head>
-<body><div id="dot"></div><script>
+<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#202020}#dot{position:absolute;left:0;top:calc(50% - 3px);width:6px;height:6px;border-radius:50%;background:#808080;will-change:transform}#canvas{display:none;width:100%;height:100%}</style></head>
+<body><div id="dot"></div><canvas id="canvas"></canvas><script>
 "use strict";
 (() => {
   const dot = document.getElementById("dot");
-  let running = false, noPaint = false, request = null, count = 0;
+  const canvas = document.getElementById("canvas");
+  const context = canvas.getContext("2d");
+  let running = false, noPaint = false, request = null, count = 0, method = "ball";
+  let phase = 0, previousTime = null;
+  function resizeCanvas() {
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(innerWidth * ratio));
+    canvas.height = Math.max(1, Math.round(innerHeight * ratio));
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  }
+  function drawCanvas(x) {
+    context.clearRect(0, 0, innerWidth, innerHeight);
+    context.fillStyle = "#808080";
+    context.beginPath();
+    context.arc(x + 3, innerHeight / 2, 3, 0, Math.PI * 2);
+    context.fill();
+  }
+  resizeCanvas();
+  window.addEventListener("resize", resizeCanvas);
   function tick(time) {
     if (!running) return;
     count++;
+    if (previousTime !== null) phase += (time - previousTime) / 2400;
+    previousTime = time;
     if (!noPaint) {
-      const cycle = (time % 2400) / 2400;
-      const position = cycle < 0.5 ? cycle * 2 : (1 - cycle) * 2;
-      dot.style.transform = `translate3d(${(Math.max(0, innerWidth - 22) * position).toFixed(3)}px,0,0)`;
+      const x = Math.min(246, Math.max(0, innerWidth - 6)) * (1 - Math.cos(phase * Math.PI * 2)) / 2;
+      if (method === "canvas") drawCanvas(x);
+      else dot.style.transform = `translateX(${x.toFixed(3)}px)`;
     }
     request = requestAnimationFrame(tick);
   }
   window.spark = {
+    setMethod(value) {
+      if (value !== "ball" && value !== "canvas") throw new Error("Unknown drawing method");
+      this.stop();
+      method = value;
+      dot.style.display = method === "ball" ? "block" : "none";
+      canvas.style.display = method === "canvas" ? "block" : "none";
+      if (method === "canvas") { resizeCanvas(); drawCanvas(0); }
+    },
     start(testWithoutPaint) {
       noPaint = !!testWithoutPaint;
       if (running) return;
       running = true;
+      previousTime = null;
       request = requestAnimationFrame(tick);
     },
     stop() {
       running = false;
       if (request !== null) cancelAnimationFrame(request);
       request = null;
+      previousTime = null;
     },
     snapshot() {
-      return { callbackCount: count, running, noPaint, visibilityState: document.visibilityState,
+      return { callbackCount: count, running, noPaint, method, visibilityState: document.visibilityState,
         documentHidden: document.hidden, performanceMilliseconds: performance.now() };
     }
   };

@@ -1,9 +1,10 @@
-param([ValidateSet('x64','x86')][string]$Architecture='x64',[switch]$ExperimentalBackgroundTimers)
+param([ValidateSet('x64','x86')][string]$Architecture='x64',[ValidateSet('zh-CN','en-US')][string]$Language='zh-CN',[switch]$ExperimentalBackgroundTimers,[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $projectRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$exe=Join-Path $projectRoot ('dist\win-'+$Architecture+'\SparkRefreshLab.exe')
+$output=if($OutputDirectory){if([IO.Path]::IsPathRooted($OutputDirectory)){[IO.Path]::GetFullPath($OutputDirectory)}else{[IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDirectory))}}else{Join-Path $projectRoot ('dist\v0.3.0-'+$Language+'-win-'+$Architecture)}
+$exe=Join-Path $output $(if($Language -eq 'en-US'){'SparkRefreshLab-EN.exe'}else{'SparkRefreshLab-ZH.exe'})
 if(-not(Test-Path -LiteralPath $exe)){throw 'Build the app before the finite smoke test.'}
-if(Get-Process SparkRefreshLab -ErrorAction SilentlyContinue){throw 'SparkRefreshLab is already running. Stop it before the finite smoke test; no existing process was changed.'}
+if(Get-Process SparkRefreshLab,SparkRefreshLab-ZH,SparkRefreshLab-EN -ErrorAction SilentlyContinue){throw 'A language version is already running. Stop it before the finite smoke test; no existing process was changed.'}
 $args=@('--self-test')
 if($ExperimentalBackgroundTimers){$args+='--experimental-background-timers'}
 # Self-test never paints animation: hidden 4s, visible static 4s, stopped 1s, then closes.

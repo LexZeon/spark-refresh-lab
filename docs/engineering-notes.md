@@ -1,12 +1,14 @@
 # Visibility experiment notes
 
+Version 0.3 offers the visible Ball and Canvas methods for continuous use. The affected user reported relief from both in the [visible-method comparison](results-2026-10-23-local-multimethod.md). The two language packages keep the same drawing content and geometry; repeated same-language launches show the existing controller instead of starting another animation. The following hidden-mode notes describe the original diagnostic experiment, which remains outside the ordinary controls.
+
 The hidden mode intentionally hides its real top-level WinForms HWND. It leaves the WebView2 controller's requested visibility flag enabled as an experiment and logs the actual HWND visibility separately. The control flag, HWND visibility and document visibility must not be conflated. No transparent visible window or off-screen presentation is substituted for the hidden mode.
 
 WebView2 may still stop rendering or throttle callbacks based on host visibility and occlusion. A callback counter is diagnostic information about JavaScript execution, not a measurement of swap-chain presentation, DWM dirty regions, physical panel scanout, or flicker. A hidden mode that does not help is a valid experimental outcome.
 
 The normal hidden/visible run polls a local JavaScript snapshot once per second. That polling, browser-process lifetime, and any GPU activity are part of the intervention; the experiment does not isolate rAF alone. A fully exited baseline is distinct from Stopped, which cancels the local animation and sampling but can retain the WebView2 process.
 
-The finite native self-test uses a no-paint page mode so it can validate host visibility, callback diagnostics and shutdown without repeatedly moving visible pixels. Passing it does not establish efficacy or validate the physical display. The first normal hidden-mode trial subsequently ran with noPaint=false; the user still reported flicker despite verified active callbacks. A new-tool visible/covered subjective comparison remains unperformed.
+The finite native self-test uses a no-paint page mode so it can validate host visibility, callback diagnostics and shutdown without repeatedly moving visible pixels. Passing it does not establish efficacy or validate the physical display. The first normal hidden-mode trial subsequently ran with noPaint=false; the user still reported flicker despite verified active callbacks. Later visible Ball and Canvas user observations are documented separately in the result linked above.
 
 Optional `--experimental-background-timers` adds only `--disable-background-timer-throttling` to this app's WebView2 environment. It does not change the user's ordinary Edge/Chrome profile or global browser configuration, and it does not guarantee background rAF or rendering. Runtime flags are diagnostic and may change between runtime releases.
 

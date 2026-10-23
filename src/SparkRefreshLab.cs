@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,12 +13,14 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 
-[assembly: AssemblyTitle("Spark Refresh Lab")]
-[assembly: AssemblyVersion("0.1.0.0")]
+[assembly: AssemblyTitle(SparkRefreshLab.UiText.AppTitle)]
+[assembly: AssemblyDescription(SparkRefreshLab.UiText.AppDescription)]
+[assembly: AssemblyProduct(SparkRefreshLab.UiText.AppTitle)]
+[assembly: AssemblyVersion("0.3.0.0")]
 
 namespace SparkRefreshLab
 {
-    internal enum RunMode { Stopped, Hidden, Visible }
+    internal enum RunMode { Stopped, Hidden, Visible, Ball, Canvas, Gdi, Wpf, Edge }
 
     internal sealed class Options
     {
@@ -38,18 +41,18 @@ namespace SparkRefreshLab
                 else if (arg == "--duration" && ++i < args.Length)
                 {
                     if (!int.TryParse(args[i], out result.Duration) || result.Duration < 1 || result.Duration > 300)
-                        throw new ArgumentException("--duration must be 1..300 seconds.");
+                        throw new ArgumentException(UiText.DurationError);
                 }
                 else if (arg == "--mode" && ++i < args.Length)
                 {
                     if (!Enum.TryParse<RunMode>(args[i], true, out result.Mode) || !Enum.IsDefined(typeof(RunMode), result.Mode))
-                        throw new ArgumentException("--mode must be stopped, hidden or visible.");
+                        throw new ArgumentException(UiText.ModeError);
                 }
-                else throw new ArgumentException("Unknown or incomplete option: " + arg);
+                else throw new ArgumentException(UiText.OptionError + arg);
             }
             if (result.SelfTest) result.Duration = 25;
             if (autoExitRequested && result.Duration == 0)
-                throw new ArgumentException("--auto-exit requires --duration seconds or --self-test.");
+                throw new ArgumentException(UiText.AutoExitError);
             return result;
         }
     }
@@ -61,30 +64,53 @@ namespace SparkRefreshLab
         {
             Options options;
             try { options = Options.Parse(args); }
-            catch (Exception error) { MessageBox.Show(error.Message, "Spark Refresh Lab"); return 2; }
+            catch (Exception error) { MessageBox.Show(error.Message, UiText.AppTitle); return 2; }
+            string showControlsEventName;
+            using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+                showControlsEventName = @"Local\SparkRefreshLab.ShowControls." + identity.User.Value + "." + UiText.Locale;
             bool created;
             using (Mutex mutex = new Mutex(true, @"Local\SparkRefreshLab-0.1", out created))
             {
                 if (!created)
                 {
-                    if (!options.SelfTest && options.Duration == 0)
-                        MessageBox.Show("程序已在运行。请从托盘打开控制台或退出。", "Spark Refresh Lab");
-                    return 3;
+                    try
+                    {
+                        using (EventWaitHandle existing = EventWaitHandle.OpenExisting(showControlsEventName))
+                            if (!existing.Set()) throw new InvalidOperationException("Unable to signal the existing window.");
+                        return 0;
+                    }
+                    catch (Exception error)
+                    {
+                        DiagnosticLog.Write("show-controls-signal-error", new { type = error.GetType().Name, hresult = error.HResult });
+                        if (!options.SelfTest && options.Duration == 0)
+                            MessageBox.Show(UiText.SignalFailed, UiText.AppTitle);
+                        return 3;
+                    }
                 }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                EventWaitHandle showControlsSignal = null;
                 try
                 {
-                    using (LabContext context = new LabContext(options)) Application.Run(context);
+                    showControlsSignal = new EventWaitHandle(false, EventResetMode.AutoReset, showControlsEventName);
+                    using (LabContext context = new LabContext(options, showControlsSignal))
+                    {
+                        showControlsSignal = null; // LabContext now owns the handle and registered wait.
+                        Application.Run(context);
+                    }
                 }
                 catch (Exception error)
                 {
                     DiagnosticLog.Write("fatal", new { type = error.GetType().Name, hresult = error.HResult });
                     if (!options.SelfTest && options.Duration == 0)
-                        MessageBox.Show(error.Message, "Spark Refresh Lab · 启动失败");
+                        MessageBox.Show(UiText.Error(UiText.StartupFailed, error), UiText.AppTitle);
                     return 1;
                 }
-                finally { mutex.ReleaseMutex(); }
+                finally
+                {
+                    if (showControlsSignal != null) showControlsSignal.Dispose();
+                    mutex.ReleaseMutex();
+                }
             }
             return Environment.ExitCode;
         }
@@ -109,9 +135,13 @@ namespace SparkRefreshLab
 
     internal sealed class RenderHost : Form
     {
+        private readonly Button stopButton = new Button();
+        private bool compactPresentation;
+        internal event EventHandler StopRequested;
+
         internal RenderHost()
         {
-            Text = "Spark Refresh Lab · 可见对照";
+            Text = UiText.AppTitle;
             AutoScaleDimensions = new SizeF(96, 96);
             AutoScaleMode = AutoScaleMode.Dpi;
             ClientSize = new Size(220, 48);
@@ -120,11 +150,44 @@ namespace SparkRefreshLab
             TopMost = false;
             BackColor = Color.FromArgb(32, 32, 32);
             StartPosition = FormStartPosition.Manual;
+            stopButton.Text = UiText.Exit;
+            stopButton.Font = new Font(UiText.FontName, 9F);
+            stopButton.BackColor = Color.FromArgb(32, 32, 32);
+            stopButton.ForeColor = Color.FromArgb(192, 192, 192);
+            stopButton.FlatStyle = FlatStyle.Flat;
+            stopButton.FlatAppearance.BorderColor = Color.FromArgb(96, 96, 96);
+            stopButton.UseVisualStyleBackColor = false;
+            stopButton.Visible = false;
+            stopButton.Click += delegate { EventHandler handler = StopRequested; if (handler != null) handler(this, EventArgs.Empty); };
+            Controls.Add(stopButton);
         }
+
+        internal Rectangle RenderBounds
+        {
+            get
+            {
+                int reserved = compactPresentation ? (int)Math.Round(50 * DeviceDpi / 96F) : 0;
+                return new Rectangle(0, 0, Math.Max(0, ClientSize.Width - reserved), ClientSize.Height);
+            }
+        }
+
+        internal bool StopButtonVisible { get { return stopButton.Visible; } }
         internal void PlaceInCorner()
         {
             Rectangle area = Screen.PrimaryScreen.WorkingArea;
             Location = new Point(area.Right - Width - 16, area.Bottom - Height - 16);
+        }
+        internal void ConfigureMode(RunMode mode)
+        {
+            bool compact = mode == RunMode.Ball || mode == RunMode.Canvas || mode == RunMode.Gdi || mode == RunMode.Wpf || mode == RunMode.Edge;
+            compactPresentation = compact;
+            float scale = DeviceDpi / 96F;
+            ClientSize = new Size((int)Math.Round((compact ? 302 : 220) * scale), (int)Math.Round((compact ? 22 : 48) * scale));
+            Rectangle render = RenderBounds;
+            stopButton.Bounds = new Rectangle(render.Right, 0, ClientSize.Width - render.Width, ClientSize.Height);
+            stopButton.Visible = compact;
+            stopButton.BringToFront();
+            TopMost = compact;
         }
         protected override bool ShowWithoutActivation { get { return true; } }
     }
@@ -143,30 +206,45 @@ namespace SparkRefreshLab
         private readonly System.Windows.Forms.Timer deadlineTimer = new System.Windows.Forms.Timer();
         private readonly Stopwatch lifetime = Stopwatch.StartNew();
         private readonly Stopwatch selfTestClock = new Stopwatch();
+        private readonly Stopwatch modeClock = new Stopwatch();
         private readonly JavaScriptSerializer serializer = new JavaScriptSerializer();
         private readonly TaskCompletionSource<bool> browserExited = new TaskCompletionSource<bool>();
         private CoreWebView2Environment environment;
         private CoreWebView2Controller controller;
+        private IRefreshSurface nativeSurface;
+        private EventWaitHandle showControlsSignal;
+        private RegisteredWaitHandle showControlsWait;
         private Task initializeTask;
         private TaskCompletionSource<bool> navigationReady;
         private RunMode wantedMode = RunMode.Stopped;
         private RunMode currentMode = RunMode.Stopped;
-        private bool exiting, applying, polling, ready;
+        private volatile bool exiting;
+        private bool applying, polling, ready;
         private int selfTestStage = -1;
         private int modeRevision;
         private double lastCount, lastPollTime;
         private uint browserPid;
+        private bool uiTrial;
+        private bool consoleRequested;
 
-        internal LabContext(Options settings)
+        internal LabContext(Options settings, EventWaitHandle controlsSignal)
         {
             options = settings;
+            showControlsSignal = controlsSignal;
             SetupConsole();
             SetupTray();
-            host.Resize += delegate { if (controller != null && !exiting) controller.Bounds = host.ClientRectangle; };
+            host.Resize += delegate
+            {
+                if (controller != null && !exiting) controller.Bounds = host.RenderBounds;
+                if (nativeSurface != null) nativeSurface.View.Bounds = host.RenderBounds;
+            };
+            host.StopRequested += async delegate { await QuitAsync(); };
             host.FormClosing += delegate(object sender, FormClosingEventArgs e) { if (!exiting) { e.Cancel = true; SetMode(RunMode.Stopped); } };
             // Force a real HWND without showing it. Hidden mode never uses transparency or off-screen placement.
             IntPtr hostHandle = host.Handle;
             IntPtr consoleHandle = console.Handle;
+            showControlsWait = ThreadPool.RegisterWaitForSingleObject(showControlsSignal, OnShowControlsRequested,
+                null, Timeout.Infinite, false);
             pollTimer.Interval = 1000;
             pollTimer.Tick += async delegate { await PollAsync(); };
             deadlineTimer.Interval = 200;
@@ -174,15 +252,15 @@ namespace SparkRefreshLab
             if (options.SelfTest || options.Duration > 0) deadlineTimer.Start();
             ushort processMachine, nativeMachine;
             bool architectureRead = IsWow64Process2(Process.GetCurrentProcess().Handle, out processMachine, out nativeMachine);
-            DiagnosticLog.Write("startup", new { version = "0.1.0", pid = Process.GetCurrentProcess().Id,
+            if (!options.SelfTest && options.Mode == RunMode.Stopped && options.Duration > 0) modeClock.Start();
+            DiagnosticLog.Write("startup", new { version = "local0.3.0", pid = Process.GetCurrentProcess().Id,
                 processArchitecture = Environment.Is64BitProcess ? "64-bit" : "32-bit",
                 processEnvironmentArchitecture = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE"),
                 processMachine = architectureRead ? "0x" + processMachine.ToString("X4") : "unknown",
                 nativeMachine = architectureRead ? "0x" + nativeMachine.ToString("X4") : "unknown",
-                mode = options.Mode.ToString(), selfTest = options.SelfTest,
+                mode = options.Mode.ToString(), selfTest = options.SelfTest, language = UiText.Locale,
                 experimentalBackgroundTimers = options.ExperimentalBackgroundTimers,
                 evidenceLimit = "rAF callback counts are not presentation, scanout or panel refresh measurements." });
-            if (!options.SelfTest && options.Mode == RunMode.Stopped) console.Show();
             console.BeginInvoke(new Action(async delegate
             {
                 if (options.SelfTest)
@@ -191,44 +269,85 @@ namespace SparkRefreshLab
                     if (ready && !exiting) { selfTestClock.Start(); selfTestStage = 0; SetMode(RunMode.Hidden); }
                 }
                 else if (options.Mode != RunMode.Stopped) SetMode(options.Mode);
+                else ShowConsole();
             }));
+        }
+
+        private void OnShowControlsRequested(object state, bool timedOut)
+        {
+            if (timedOut || exiting || console.IsDisposed || !console.IsHandleCreated) return;
+            try
+            {
+                console.BeginInvoke(new Action(delegate
+                {
+                    if (!exiting && !console.IsDisposed) ShowConsole();
+                }));
+            }
+            catch (InvalidOperationException) { } // The window can close after the guards above.
+        }
+
+        private void StopControlsListener()
+        {
+            if (showControlsWait != null) { showControlsWait.Unregister(null); showControlsWait = null; }
+            if (showControlsSignal != null) { showControlsSignal.Dispose(); showControlsSignal = null; }
         }
 
         private void SetupConsole()
         {
-            console.Text = "Spark Refresh Lab · 控制台";
+            console.Text = UiText.AppTitle + " · v0.3.0";
             console.ClientSize = new Size(600, 355);
             console.StartPosition = FormStartPosition.CenterScreen;
-            console.Font = new Font("Microsoft YaHei UI", 9F);
+            console.Font = new Font(UiText.FontName, 9F);
             Label intro = new Label();
-            intro.Text = "实验工具：隐藏可能被系统暂停，不能保证防闪。回调数 ≠ 实际屏幕刷新。\n隐藏模式会隐藏渲染窗；仅托盘保留退出入口。测试时请关闭此控制台。";
+            intro.Text = UiText.Intro;
             intro.Bounds = new Rectangle(12, 10, 576, 44);
             console.Controls.Add(intro);
-            AddButton("停止", 12, delegate { SetMode(RunMode.Stopped); });
-            AddButton("完全隐藏测试", 110, delegate { SetMode(RunMode.Hidden); });
-            AddButton("可见对照", 248, delegate { SetMode(RunMode.Visible); });
-            AddButton("退出", 386, async delegate { await QuitAsync(); });
-            status.Text = "已停止；尚未启动 WebView2。";
+            AddButton(UiText.BallButton, 12, delegate { StartContinuous(RunMode.Ball); }, 180);
+            AddButton(UiText.CanvasButton, 202, delegate { StartContinuous(RunMode.Canvas); }, 180);
+            AddButton(UiText.Stop, 392, delegate { SetMode(RunMode.Stopped); });
+            AddButton(UiText.Exit, 490, async delegate { await QuitAsync(); });
+            status.Text = UiText.InitialStatus;
             status.Bounds = new Rectangle(12, 99, 576, 35);
             console.Controls.Add(status);
             details.Multiline = true;
             details.ReadOnly = true;
             details.ScrollBars = ScrollBars.Vertical;
             details.Bounds = new Rectangle(12, 137, 576, 180);
-            details.Text = "仅加载随程序嵌入的本地页面。无系统/驱动更改、无自启动。\r\n日志：" + DiagnosticLog.FilePath;
+            details.Text = UiText.InitialDetails + "\r\n\r\n" + UiText.LogLabel + DiagnosticLog.FilePath;
             console.Controls.Add(details);
             Label footer = new Label();
-            footer.Text = "关闭此控制台仅隐藏窗口。完全退出请点“退出”或托盘菜单“退出”。";
+            footer.Text = UiText.Footer;
             footer.Bounds = new Rectangle(12, 325, 576, 23);
             console.Controls.Add(footer);
-            console.FormClosing += delegate(object sender, FormClosingEventArgs e) { if (!exiting) { e.Cancel = true; console.Hide(); } };
+            console.FormClosing += delegate(object sender, FormClosingEventArgs e) { if (!exiting) { e.Cancel = true; RequestQuit(); } };
         }
 
-        private void AddButton(string text, int left, EventHandler action)
+        private void ShowConsole()
+        {
+            if (exiting || console.IsDisposed) return;
+            consoleRequested = true;
+            console.Show();
+            // STARTUPINFO/SW_HIDE can consume the first ShowWindow call. Retry only
+            // after the message loop runs, and never override an intentional Hide.
+            console.BeginInvoke(new Action(delegate
+            {
+                if (exiting || console.IsDisposed || !consoleRequested) return;
+                if (!IsWindowVisible(console.Handle)) { console.Hide(); console.Show(); }
+                console.Activate();
+            }));
+        }
+
+        private void HideConsole()
+        {
+            consoleRequested = false;
+            console.Hide();
+        }
+
+        private void AddButton(string text, int left, EventHandler action, int width = 88)
         {
             Button button = new Button();
             button.Text = text;
-            button.Bounds = new Rectangle(left, 60, text == "停止" ? 88 : 128, 30);
+            button.Bounds = new Rectangle(left, 60, width, 30);
             button.Click += action;
             console.Controls.Add(button);
         }
@@ -236,17 +355,76 @@ namespace SparkRefreshLab
         private void SetupTray()
         {
             ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Items.Add("停止", null, delegate { SetMode(RunMode.Stopped); });
-            menu.Items.Add("完全隐藏测试", null, delegate { SetMode(RunMode.Hidden); });
-            menu.Items.Add("可见对照", null, delegate { SetMode(RunMode.Visible); });
-            menu.Items.Add("控制台", null, delegate { if (!exiting) { console.Show(); console.Activate(); } });
+            menu.Items.Add(UiText.Stop, null, delegate { SetMode(RunMode.Stopped); });
+            menu.Items.Add(UiText.BallButton, null, delegate { StartContinuous(RunMode.Ball); });
+            menu.Items.Add(UiText.CanvasButton, null, delegate { StartContinuous(RunMode.Canvas); });
+            menu.Items.Add(UiText.Controls, null, delegate { ShowConsole(); });
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("退出", null, async delegate { await QuitAsync(); });
+            menu.Items.Add(UiText.Exit, null, async delegate { await QuitAsync(); });
             tray.Icon = (Icon)SystemIcons.Application.Clone();
-            tray.Text = "Spark Refresh Lab · 已停止";
+            tray.Text = UiText.AppTitle + " · " + UiText.Stopped;
             tray.ContextMenuStrip = menu;
-            tray.DoubleClick += delegate { if (!exiting) { console.Show(); console.Activate(); } };
+            tray.DoubleClick += delegate { ShowConsole(); };
             tray.Visible = true;
+            ContextMenuStrip renderMenu = new ContextMenuStrip();
+            renderMenu.Items.Add(UiText.StopAndReturn, null, delegate { SetMode(RunMode.Stopped); });
+            renderMenu.Items.Add(UiText.Exit, null, async delegate { await QuitAsync(); });
+            host.ContextMenuStrip = renderMenu;
+        }
+
+        private void StartContinuous(RunMode mode)
+        {
+            uiTrial = false;
+            modeClock.Reset();
+            if (options.Duration == 0 && !options.SelfTest) deadlineTimer.Stop();
+            status.Text = ModeLabel(mode) + (options.Duration > 0 ? UiText.PreparingTimed : UiText.PreparingContinuous);
+            SetMode(mode);
+        }
+
+        private void StartTrial(RunMode mode)
+        {
+            uiTrial = true;
+            modeClock.Reset();
+            deadlineTimer.Start();
+            status.Text = ModeLabel(mode) + UiText.PreparingTrial;
+            SetMode(mode);
+        }
+
+        private static string ModeLabel(RunMode mode)
+        {
+            if (mode == RunMode.Ball || mode == RunMode.Edge) return UiText.Ball;
+            if (mode == RunMode.Canvas) return UiText.Canvas;
+            if (mode == RunMode.Gdi) return UiText.T("图形接口诊断", "GDI diagnostic");
+            if (mode == RunMode.Wpf) return UiText.T("窗口绘制诊断", "WPF diagnostic");
+            if (mode == RunMode.Hidden) return UiText.T("隐藏诊断", "Hidden diagnostic");
+            if (mode == RunMode.Visible) return UiText.T("可见诊断", "Visible diagnostic");
+            return UiText.Stopped;
+        }
+
+        private static bool IsNative(RunMode mode) { return mode == RunMode.Gdi || mode == RunMode.Wpf; }
+
+        private object HostGeometry()
+        {
+            return new { x = host.Left, y = host.Top, width = host.Width, height = host.Height,
+                clientWidth = host.ClientSize.Width, clientHeight = host.ClientSize.Height, dpi = host.DeviceDpi,
+                topMost = host.TopMost, renderBounds = host.RenderBounds.ToString(), stopButtonVisible = host.StopButtonVisible,
+                controllerBounds = controller != null ? controller.Bounds.ToString() : null };
+        }
+
+        private void StopNative()
+        {
+            if (nativeSurface != null) nativeSurface.Stop();
+        }
+
+        private void ClearNative()
+        {
+            if (nativeSurface == null) return;
+            nativeSurface.Stop();
+            DiagnosticLog.Write("native-stopped", new { mechanism = nativeSurface.Mechanism, running = nativeSurface.IsRunning,
+                callbacks = nativeSurface.CallbackCount, draws = nativeSurface.DrawCount, wpfTier = nativeSurface.WpfRenderingTier });
+            host.Controls.Remove(nativeSurface.View);
+            nativeSurface.Dispose();
+            nativeSurface = null;
         }
 
         private async Task EnsureInitializedAsync()
@@ -270,7 +448,7 @@ namespace SparkRefreshLab
                 controller = await environment.CreateCoreWebView2ControllerAsync(host.Handle);
                 browserPid = controller.CoreWebView2.BrowserProcessId;
                 if (exiting) { controller.Close(); controller = null; return; }
-                controller.Bounds = host.ClientRectangle;
+                controller.Bounds = host.RenderBounds;
                 controller.DefaultBackgroundColor = Color.FromArgb(32, 32, 32);
                 controller.IsVisible = false;
                 CoreWebView2 core = controller.CoreWebView2;
@@ -316,28 +494,36 @@ namespace SparkRefreshLab
                 ready = true;
                 DiagnosticLog.Write("initialized", new { runtimeVersion = environment.BrowserVersionString, browserPid = browserPid,
                     controllerIsVisible = controller.IsVisible, hostIsWindowVisible = IsWindowVisible(host.Handle), flags = flags });
-                status.Text = "WebView2 已初始化；从托盘选择模式。";
+                status.Text = UiText.Ready;
             }
             catch (Exception error)
             {
                 DiagnosticLog.Write("initialization-error", new { type = error.GetType().Name, hresult = error.HResult });
-                status.Text = "初始化失败，可退出：" + error.Message;
+                status.Text = UiText.Error(UiText.InitializationFailed, error);
                 if (controller != null) { try { controller.Close(); } catch (Exception) { } controller = null; }
                 host.Hide();
                 if (options.SelfTest || options.Duration > 0) { Environment.ExitCode = 1; RequestQuit(); }
-                else if (!exiting) console.Show();
+                else if (!exiting) ShowConsole();
             }
         }
 
         private async void SetMode(RunMode mode)
         {
             wantedMode = mode;
+            StopNative();
+            host.Hide();
             if (mode == RunMode.Stopped)
             {
+                uiTrial = false;
+                modeClock.Stop();
                 modeRevision++;
                 pollTimer.Stop();
-                host.Hide();
                 if (controller != null) { try { controller.IsVisible = false; } catch (Exception) { } }
+                if (!options.SelfTest && options.Duration == 0)
+                {
+                    deadlineTimer.Stop();
+                    if (!exiting) ShowConsole();
+                }
             }
             if (exiting || applying) return;
             applying = true;
@@ -347,37 +533,62 @@ namespace SparkRefreshLab
                 {
                     RunMode target = wantedMode;
                     modeRevision++;
-                    if (target != RunMode.Stopped)
+                    if (target != RunMode.Stopped && !IsNative(target))
                     {
                         await EnsureInitializedAsync();
-                        if (!ready) { wantedMode = RunMode.Stopped; currentMode = RunMode.Stopped; tray.Text = "Spark Refresh Lab · 已停止"; return; }
+                        if (!ready) { wantedMode = RunMode.Stopped; currentMode = RunMode.Stopped; tray.Text = UiText.AppTitle + " · " + UiText.Stopped; return; }
                     }
                     if (exiting) return;
                     if (target != wantedMode) continue;
                     pollTimer.Stop();
                     host.Hide();
+                    ClearNative();
+                    host.ConfigureMode(target);
                     if (controller != null && ready)
                     {
                         controller.IsVisible = false;
                         await ExecuteScriptBoundedAsync("window.spark.stop()", 1000);
                         if (exiting) return;
                         if (target != wantedMode) continue;
-                        if (target == RunMode.Visible) { host.PlaceInCorner(); host.Show(); controller.IsVisible = true; }
+                        if (target != RunMode.Stopped && !IsNative(target))
+                            await ExecuteScriptBoundedAsync("window.spark.setMethod('" + (target == RunMode.Canvas ? "canvas" : "ball") + "')", 1000);
+                        if (exiting) return;
+                        if (target != wantedMode) continue;
+                        if (target == RunMode.Visible || target == RunMode.Ball || target == RunMode.Canvas || target == RunMode.Edge) { host.PlaceInCorner(); host.Show(); controller.IsVisible = true; }
                         else if (target == RunMode.Hidden) { host.Hide(); controller.IsVisible = true; }
                         else { host.Hide(); controller.IsVisible = false; }
-                        if (target != RunMode.Stopped)
+                        if (target != RunMode.Stopped && !IsNative(target))
                             await ExecuteScriptBoundedAsync("window.spark.start(" + (options.SelfTest ? "true" : "false") + ")", 1000);
                         if (exiting) return;
+                        if (target != wantedMode) continue;
                     }
-                    else host.Hide();
+                    if (IsNative(target))
+                    {
+                        nativeSurface = target == RunMode.Gdi ? NativeRefreshSurfaces.CreateGdi() : NativeRefreshSurfaces.CreateWpf();
+                        nativeSurface.View.Dock = DockStyle.None;
+                        nativeSurface.View.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+                        nativeSurface.View.Bounds = host.RenderBounds;
+                        nativeSurface.View.ContextMenuStrip = host.ContextMenuStrip;
+                        host.Controls.Add(nativeSurface.View);
+                        host.PlaceInCorner();
+                        host.Show();
+                        nativeSurface.Start();
+                    }
                     currentMode = target;
-                    tray.Text = "Spark Refresh Lab · " + target;
-                    status.Text = "模式：" + target + "；回调数仅作诊断，不代表实际呈现。";
+                    tray.Text = UiText.AppTitle + " · " + ModeLabel(target);
+                    status.Text = target == RunMode.Stopped ? UiText.InitialStatus : ModeLabel(target) + (uiTrial ? UiText.TrialStatus : UiText.RunningStatus);
+                    details.Text = UiText.MethodLabel + ModeLabel(target) + "\r\n" + UiText.Details + "\r\n\r\n" + UiText.LogLabel + DiagnosticLog.FilePath;
                     lastCount = 0;
                     lastPollTime = 0;
                     DiagnosticLog.Write("mode", new { mode = target.ToString(), controllerIsVisible = controller != null && controller.IsVisible,
-                        hostIsWindowVisible = IsWindowVisible(host.Handle), selfTestNoPaint = options.SelfTest });
-                    if (target != RunMode.Stopped) { console.Hide(); pollTimer.Start(); }
+                        hostIsWindowVisible = IsWindowVisible(host.Handle), geometry = HostGeometry(), selfTestNoPaint = options.SelfTest,
+                        nativeMechanism = nativeSurface != null ? nativeSurface.Mechanism : null });
+                    if (target != RunMode.Stopped)
+                    {
+                        modeClock.Restart();
+                        HideConsole();
+                        pollTimer.Start();
+                    }
                     await PollAsync();
                     if (target == wantedMode) break;
                 }
@@ -385,19 +596,30 @@ namespace SparkRefreshLab
             catch (Exception error)
             {
                 DiagnosticLog.Write("mode-error", new { type = error.GetType().Name, hresult = error.HResult });
-                status.Text = "模式切换失败，可退出：" + error.Message;
+                status.Text = UiText.Error(UiText.SwitchFailed, error);
                 host.Hide();
                 pollTimer.Stop();
+                StopNative();
                 if (controller != null) { try { controller.IsVisible = false; } catch (Exception) { } }
                 if (options.SelfTest || options.Duration > 0) { Environment.ExitCode = 1; RequestQuit(); }
-                else if (!exiting) console.Show();
+                else if (!exiting) ShowConsole();
             }
             finally { applying = false; }
         }
 
         private async Task PollAsync()
         {
-            if (exiting || polling || !ready || controller == null) return;
+            if (exiting || polling) return;
+            if (nativeSurface != null)
+            {
+                DiagnosticLog.Write("sample", new { mode = currentMode.ToString(), controllerIsVisible = controller != null && controller.IsVisible,
+                    hostIsWindowVisible = IsWindowVisible(host.Handle), geometry = HostGeometry(),
+                    native = new { mechanism = nativeSurface.Mechanism, running = nativeSurface.IsRunning,
+                        callbackCount = nativeSurface.CallbackCount, drawCount = nativeSurface.DrawCount, wpfTier = nativeSurface.WpfRenderingTier },
+                    measurement = "Native callbacks and OnPaint/OnRender counts only; not GPU presents, DWM frames or panel refreshes." });
+                return;
+            }
+            if (!ready || controller == null) return;
             polling = true;
             int revision = modeRevision;
             try
@@ -410,9 +632,9 @@ namespace SparkRefreshLab
                 double? callbackHz = lastPollTime > 0 ? (double?)((count - lastCount) / (now - lastPollTime)) : null;
                 object data = new { mode = currentMode.ToString(), controllerIsVisible = controller.IsVisible,
                     hostIsWindowVisible = IsWindowVisible(host.Handle), callbackHz = callbackHz, page = page,
+                    geometry = HostGeometry(),
                     measurement = "JavaScript rAF callbacks only; not GPU presents, DWM frames or panel refreshes." };
                 DiagnosticLog.Write("sample", data);
-                details.Text = serializer.Serialize(data) + "\r\n\r\n日志：" + DiagnosticLog.FilePath;
                 lastCount = count;
                 lastPollTime = now;
             }
@@ -431,6 +653,12 @@ namespace SparkRefreshLab
         private async void DeadlineTick(object sender, EventArgs e)
         {
             if (exiting) return;
+            if (uiTrial && modeClock.IsRunning && modeClock.Elapsed.TotalSeconds >= 60)
+            {
+                DiagnosticLog.Write("trial-completed", new { mode = currentMode.ToString(), seconds = modeClock.Elapsed.TotalSeconds });
+                SetMode(RunMode.Stopped);
+                return;
+            }
             if (options.SelfTest && selfTestClock.IsRunning)
             {
                 double seconds = selfTestClock.Elapsed.TotalSeconds;
@@ -438,10 +666,17 @@ namespace SparkRefreshLab
                 else if (selfTestStage == 1 && seconds >= 8) { selfTestStage = 2; SetMode(RunMode.Stopped); }
                 else if (selfTestStage == 2 && seconds >= 9) { await QuitAsync(); return; }
             }
-            if (options.Duration > 0 && lifetime.Elapsed.TotalSeconds >= options.Duration)
+            bool deadline = options.SelfTest ? lifetime.Elapsed.TotalSeconds >= options.Duration : modeClock.IsRunning && modeClock.Elapsed.TotalSeconds >= options.Duration;
+            if (options.Duration > 0 && deadline)
             {
                 if (options.SelfTest && !ready) Environment.ExitCode = 1;
                 DiagnosticLog.Write("deadline", new { seconds = options.Duration });
+                await QuitAsync();
+            }
+            else if (options.Duration > 0 && !modeClock.IsRunning && lifetime.Elapsed.TotalSeconds >= 20)
+            {
+                Environment.ExitCode = 1;
+                DiagnosticLog.Write("mode-start-timeout", new { seconds = 20 });
                 await QuitAsync();
             }
         }
@@ -452,10 +687,13 @@ namespace SparkRefreshLab
         {
             if (exiting) return;
             exiting = true;
+            StopControlsListener();
             deadlineTimer.Stop();
             pollTimer.Stop();
+            StopNative();
+            ClearNative();
             host.Hide();
-            console.Hide();
+            HideConsole();
             bool initializationFinished = initializeTask == null || initializeTask.IsCompleted;
             if (!initializationFinished)
             {
@@ -490,8 +728,10 @@ namespace SparkRefreshLab
             if (disposing)
             {
                 exiting = true;
+                StopControlsListener();
                 pollTimer.Dispose();
                 deadlineTimer.Dispose();
+                ClearNative();
                 if (controller != null) { try { controller.Close(); } catch (Exception) { } controller = null; }
                 if (tray.Icon != null) tray.Icon.Dispose();
                 if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose();

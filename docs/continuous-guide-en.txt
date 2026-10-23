@@ -1,0 +1,118 @@
+Spark Refresh Lab 0.3.0 — English continuous-use guide
+
+WHAT IS THIS FOR?
+
+On the affected computer, typing into an otherwise still screen causes a brief
+brightness pulse, especially near the screen corners. This tool keeps a small
+animation visible to try to reduce that flicker.
+
+The user of one MSI Prestige N16 Flip AI+ / NVIDIA RTX Spark laptop reports that
+both Moving Ball and Canvas Redraw markedly alleviate the symptom. This is one
+user's experience on one computer. It does not establish that the tool will work
+on other computers, or that the cause has been identified or repaired.
+
+DOWNLOAD AND START
+
+1. Download the complete English portable ZIP:
+   SparkRefreshLab-0.3.0-en-US-win-x64.zip
+   https://github.com/LexZeon/spark-refresh-lab/releases/download/v0.3.0-experimental/SparkRefreshLab-0.3.0-en-US-win-x64.zip
+
+   Release page:
+   https://github.com/LexZeon/spark-refresh-lab/releases/tag/v0.3.0-experimental
+
+   Extract the WHOLE ZIP into a folder. Keep the EXE, DLLs, configuration file,
+   and launch scripts together. Do not move just the EXE out of the folder.
+   GitHub's automatic Source code archives are not the ready-to-run package.
+
+2. Double-click Open controls.vbs or SparkRefreshLab-EN.exe.
+   The controller opens stopped. Choose Moving Ball OR Canvas Redraw.
+   You do not need to run both methods.
+
+3. Keep the small dark-gray strip near the bottom-right of the screen visible.
+   Its dot should keep moving. Type normally and judge whether it helps.
+   There is no 60-second time limit: it runs until you stop or exit.
+   Click Exit on the right of the strip when you want to finish.
+
+You can also double-click Start moving ball.vbs or Start canvas redraw.vbs to start a method
+directly. Starting the same app again opens its current controller; select the
+other method there to change methods.
+
+Chinese and English are separate apps, and EACH contains both methods. Run only
+one language version at a time. Exit the current version before switching
+languages; the other version will ask you to exit the running app first.
+
+KEEP THE ANIMATION VISIBLE
+
+Covering the animation with another window may remove the benefit. A background
+tab or a fully hidden program has not been established as an effective solution.
+The visible strip is intentional. It stays on top and measures 302 x 22 logical
+pixels: a 252-pixel animation area plus a 50-pixel Exit button. Windows display
+scaling changes its physical size.
+
+STOP OR EXIT?
+
+Stop pauses the animation, hides the strip, and returns to the controller.
+The app stays open and may keep WebView2 processes running.
+
+Exit closes the app and ends its refresh activity. You can use:
+- Exit on the right of the animation strip;
+- Exit in the controller;
+- Exit in the tray icon's menu; or
+- the controller window's Close button.
+
+To find the controller while the animation is running, use the app's tray icon
+or click the same pinned taskbar app again.
+
+PIN TO THE WINDOWS TASKBAR
+
+Open the controller, right-click its taskbar icon, and choose Pin to taskbar.
+Later, click that icon to open the controller and choose a method. If the app is
+already running, clicking the same pinned app shows its current controller.
+The app does not pin itself automatically and has no autostart.
+
+WHAT THE USER TESTED
+
+1. Moving Ball: markedly alleviated flicker.
+2. Canvas Redraw: markedly alleviated flicker.
+3. Native GDI drawing: felt worse.
+4. WPF drawing: no reported effect.
+
+The ordinary 0.3 controls offer methods 1 and 2. Unsuccessful native and hidden
+CLI probes remain only for historical developer diagnostics.
+
+These observations are subjective. No instrument measured panel brightness or
+actual display presentation. The earlier fully hidden v0.1 experiment still
+flickered even while animation callbacks continued.
+
+FOR A SIMPLE COMPARISON
+
+Fully exit the app and stop other refresh tools or browser animations. Wait about
+10 seconds, then type a short English or Pinyin sample. Start one method, wait
+about 10 seconds with the strip visible, and type the same sample again.
+
+Stop screen capture and remote automation while observing: these activities have
+masked the symptom. Use only one animation at a time. Stop immediately if a
+method feels worse. Do not judge relief from a moving counter alone.
+
+RUNTIME REQUIREMENTS AND PRIVACY
+
+The computer must already have .NET Framework 4.8.1 and Microsoft Edge WebView2
+Evergreen Runtime installed. These runtimes are not bundled in the ZIP. The app
+does not install a display driver or require administrator elevation.
+
+This release is x64, used in the x64-compatible environment on the affected
+ARM64 Windows computer. It is not a native ARM64 app, and compatibility with every
+Windows ARM computer has not been tested.
+
+The tool does not change the display refresh rate, brightness, ICC profile,
+registry, driver, or global browser settings. It does not record typed text,
+capture the screen, or automatically upload logs. Its animation uses local
+content. The installed Microsoft WebView2 Runtime has its own update and service
+behavior. Review local diagnostic logs before choosing to share them.
+
+Callback and drawing counts are not physical screen-refresh measurements.
+No universal fix, continuous panel presentation, or cause involving PSR, PWM,
+Panel Replay, dithering, a particular driver defect, or hardware is established.
+
+Source and detailed observations:
+https://github.com/LexZeon/spark-refresh-lab
